@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Virtual World 3D — Flow99 (Standalone Demo)</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://code.playcanvas.com/playcanvas-stable.min.js"></script>
+</head>
+<body>
+<canvas id="application"></canvas>
+<div id="loadError" style="display:none;position:fixed;top:0;left:0;right:0;background:#b00020;color:#fff;padding:12px;z-index:99">
+PlayCanvas engine CDN load nahi hua. Internet check karo ya README me diye fallback se dobara try karo. 3D is waqt start nahi ho paya.
+</div>
+<!-- Top bar: Camera, Teleport, Tour, Map, Quests, Sound, Day/Night, Photo, Help -->
+<div id="hud" style="display:none">
+  <div class="topbar">
+    <button onclick="window.VW.setCamera('third')">Camera: Third</button>
+    <button onclick="window.VW.setCamera('eye')">Eye</button>
+    <button onclick="window.VW.setCamera('drone')">Drone</button>
+    <button onclick="window.VW.openMap()">Teleport / Map</button>
+    <button onclick="window.VW.showQuests()">Quests / Bag</button>
+    <button onclick="window.VW.showDemo()">WhatsApp Demo</button>
+    <button onclick="window.VW.takePhoto()">Photo</button>
+    <button onclick="window.VW.robotSelfie()">Robo Selfie</button>
+    <button onclick="window.VW.toggleFly()">Jet Fly</button>
+    <button onclick="window.VW.toggleSit()">Baitho (F)</button>
+    <button onclick="window.VW.stuckRecovery()">Wapas</button>
+    <button onclick="window.VW.goHome()">Home</button>
+    <button onclick="window.VW.feedback()">Feedback</button>
+  </div>
+  <div class="hudline"><span id="hudText"></span> | <span id="clockText"></span> | <span id="qualityText">Quality: Auto</span></div>
+  <div class="hudline">
+    Quality: <select onchange="window.VW.setQuality(this.value)"><option value="auto">Auto</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
+    Voice <input id="voiceVol" type="range" min="0" max="100" value="80">
+    Music <input id="musicVol" type="range" min="0" max="100" value="40">
+    SFX <input id="sfxVol" type="range" min="0" max="100" value="80">
+    <label><input id="subToggle" type="checkbox" checked> Subtitles</label>
+  </div>
+  <canvas id="minimap" width="140" height="140"></canvas>
+  <div id="chatBox"></div>
+  <div id="agentPanel" style="display:none"></div>
+  <div id="joystick">Joystick (drag)</div>
+</div>
+<div id="gateOverlay" class="overlay">
+  <h1>Flow99 Virtual World</h1>
+  <p>Standalone demo hai — Flow99 live se koi connection nahi, koi payment nahi, koi OTP nahi.</p>
+  <p>10-digit mobile sirf format check ke liye hai. Ye kahin bheja ya save nahi hota.</p>
+  <label>Mobile (10 digit): <input id="mobileInput" inputmode="numeric" maxlength="10" placeholder="10 digit"></label><br><br>
+  <label>Gate Code: <input id="codeInput" placeholder="flow99"></label><br><br>
+  <button onclick="window.VW.enterWorld()">Gate Khol Do (Mic permission gate par hi milegi)</button>
+  <p>Mic deny karoge to text chat se baat ho jayegi. Click karne ki zaroorat nahi — paas jate hi baat shuru hogi.</p>
+</div>
+<div id="avatarOverlay" class="overlay" style="display:none">
+  <h2>Avatar Creator</h2>
+  <p>Visitor hi duniya me ekmatra insaan hai. Baaki sab robot agents hain.</p>
+  <label>Language:
+    <select id="langSelect"><option value="hinglish">Hinglish</option><option value="hindi">Hindi</option><option value="english">English</option></select>
+  </label><br><br>
+  <label>Kapde ka rang:
+    <select id="clothSelect"><option value="red">Red</option><option value="blue">Blue</option><option value="green">Green</option></select>
+  </label><br><br>
+  <button onclick="window.VW.finishAvatar()">Duniya Me Enter Karo</button>
+</div>
+<div id="mapOverlay" style="display:none"></div>
+<script src="js/config.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/app.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
