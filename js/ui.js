@@ -81,10 +81,62 @@ window.VW.robotSelfie = function () {
   window.VW.takePhoto();
 };
 window.VW.stuckRecovery = function () {
-  window.VW.state.player.x = 0; window.VW.state.player.z = 8; window.VW.state.player.y = 0; window.VW.state.player.flying = false; window.VW.state.tapTarget = null;
+  var st = window.VW.state;
+  if (st.insideHouse) { st.insideHouse = false; if (window.VW.houseEnt) window.VW.houseEnt.enabled = true; if (window.VW.interiorEnt) window.VW.interiorEnt.enabled = false; }
+  st.player.x = 0; st.player.z = 8; st.player.y = 0; st.player.flying = false; st.tapTarget = null; st.tapPath = null;
+  if (window.VW.syncHouseButton) window.VW.syncHouseButton();
   window.VW.speak('Wapas safe jagah par aa gaye ho.', window.VW.CONFIG.agents[0]);
 };
-window.VW.goHome = function () { window.VW.teleportTo('castle'); window.VW.state.player.x = -8; window.VW.state.player.z = 28; };
+// Home ENTERS the furnished house interior (living room), not just the house area.
+window.VW.goHome = function () { if (window.VW.enterHouse) window.VW.enterHouse(); else { window.VW.teleportTo('castle'); window.VW.state.player.x = -8; window.VW.state.player.z = 28; } };
+window.VW.syncHouseButton = function () {
+  var b = document.getElementById('exitHouseBtn');
+  if (b) b.style.display = window.VW.state.insideHouse ? 'inline-block' : 'none';
+};
+// Ray from the camera through a screen tap, intersected with the ground plane
+// (y=0). This is ground-plane raycast, NOT mesh hit-testing: it does not test
+// occlusion by buildings, and a tap on a roof/wall resolves to the ground point
+// under that screen position. Collision safety comes from findPath (app.js),
+// which routes around buildings/furniture instead of walking through them.
+// Returns {x, z} or null (tap above the horizon, or no camera yet).
+window.VW.screenTapToGround = function (clientX, clientY) {
+  var cam = window.VW.camera, canvas = document.getElementById('application');
+  if (!cam || !canvas || !cam.getWorldTransform) return null;
+  var rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  var nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+  var ny = 1 - ((clientY - rect.top) / rect.height) * 2;
+  var m = cam.getWorldTransform().data;
+  var rx = m[0], ry = m[1], rz = m[2], ux = m[4], uy = m[5], uz = m[6];
+  var fx = -m[8], fy = -m[9], fz = -m[10]; // camera looks down -Z in world space
+  var fov = (cam.camera && cam.camera.fov) || 45;
+  var tanH = Math.tan(fov * Math.PI / 360), aspect = rect.width / rect.height;
+  var dx = fx + rx * nx * tanH * aspect + ux * ny * tanH;
+  var dy = fy + ry * nx * tanH * aspect + uy * ny * tanH;
+  var dz = fz + rz * nx * tanH * aspect + uz * ny * tanH;
+  var dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (!dl || dy >= -0.001) return null;
+  var o = cam.getPosition();
+  var t = -o.y / (dy / dl);
+  if (t < 0) return null;
+  return { x: o.x + (dx / dl) * t, z: o.z + (dz / dl) * t };
+};
+window.VW.handleTap = function (clientX, clientY) {
+  if (!window.VW.state.entered) return;
+  var hit = window.VW.screenTapToGround(clientX, clientY);
+  if (!hit) return;
+  var p = window.VW.state.player;
+  if (window.VW.state.insideHouse) {
+    hit.x = Math.max(-11, Math.min(-5, hit.x)); hit.z = Math.max(25.5, Math.min(30.5, hit.z));
+  } else {
+    hit.x = Math.max(-58, Math.min(58, hit.x)); hit.z = Math.max(-58, Math.min(58, hit.z));
+  }
+  if (window.VW.findPath) {
+    var path = window.VW.findPath(p.x, p.z, hit.x, hit.z);
+    if (path && path.length) { window.VW.state.tapPath = path; window.VW.state.tapTarget = path[path.length - 1]; return; }
+  }
+  window.VW.state.tapPath = null; window.VW.state.tapTarget = hit;
+};
 window.VW.toggleFly = function () { window.VW.state.player.flying = !window.VW.state.player.flying; if (window.VW.state.player.flying) window.VW.Audio.jet(); };
 window.VW.toggleSit = function () { window.VW.state.player.sitting = !window.VW.state.player.sitting; };
 window.VW.setCamera = function (mode) { window.VW.state.cameraMode = mode; };
@@ -100,14 +152,26 @@ window.VW.bindUI = function () {
   });
   document.addEventListener('keyup', function (e) { window.VW.state.keys[e.code] = false; });
   var canvas = document.getElementById('application');
-  if (canvas) canvas.addEventListener('click', function (e) {
-    // Tap-to-move: centre of screen forward point as target (simple, no raycast dependency).
-    if (!window.VW.state.entered) return;
-    var p = window.VW.state.player;
-    window.VW.state.tapTarget = { x: p.x + Math.sin(0) * 0, z: p.z - 6 };
-    // Note: precise raycast tap-to-move needs engine raycast; this fallback moves forward on tap.
-    // It is documented in README as a known simplification, not hidden.
-  });
+  if (canvas) {
+    canvas.addEventListener('click', function (e) {
+      // Suppress the synthetic click that follows a touch tap (handled below).
+      if (window.VW._lastTouchTap && Date.now() - window.VW._lastTouchTap < 600) return;
+      window.VW.handleTap(e.clientX, e.clientY);
+    });
+    canvas.addEventListener('touchend', function (e) {
+      var t = e.changedTouches && e.changedTouches[0];
+      if (t) { window.VW._lastTouchTap = Date.now(); window.VW.handleTap(t.clientX, t.clientY); }
+    }, { passive: true });
+  }
+  // Exit-house button (created here so index.html needs no edit): visible only inside.
+  var hud = document.getElementById('hud');
+  var topbar = hud ? hud.querySelector('.topbar') : null;
+  if (topbar && !document.getElementById('exitHouseBtn')) {
+    var eb = document.createElement('button');
+    eb.id = 'exitHouseBtn'; eb.textContent = 'Ghar se Bahar (Exit)'; eb.style.display = 'none';
+    eb.addEventListener('click', function () { if (window.VW.exitHouse) window.VW.exitHouse(); });
+    topbar.appendChild(eb);
+  }
   // Joystick (touch)
   var joy = document.getElementById('joystick');
   if (joy) {
