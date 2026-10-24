@@ -7,12 +7,13 @@ window.VW.state = {
   entered: false, micAllowed: false, language: 'hinglish', subtitles: true, sound: true,
   cameraMode: 'third', quality: 'auto', weather: 'clear', worldHour: 9,
   player: { x: 0, y: 0, z: 8, vy: 0, flying: false, sitting: false, swimming: false, onBoat: false },
-  keys: {}, tapTarget: null, joystick: { x: 0, y: 0 },
+  keys: {}, tapTarget: null, tapPath: null, insideHouse: false, joystick: { x: 0, y: 0 },
   visitedZones: {}, badges: [], quests: JSON.parse(JSON.stringify(window.VW.CONFIG.quests)),
   rogue: { state: 'idle', t: 0, x: 0, z: 0, target: null },
   entryDone: false, fps: 60
 };
-window.VW.entities = { agents: {}, buildings: [], lamps: [], fireflies: [], rain: [], animals: [] };
+window.VW.entities = { agents: {}, buildings: [], interiorColliders: [], lamps: [], fireflies: [], rain: [], animals: [] };
+window.VW.houseEnt = null; window.VW.interiorEnt = null;
 window.VW.makeMaterial = function (app, canvasTex, color, emissive) {
   var m = new pc.StandardMaterial();
   if (canvasTex) {
@@ -91,8 +92,11 @@ window.VW.initWorld = function () {
     // Signboard (non-blocking, small) + stall
     window.VW.box(app, app.root, 'stall-' + zn.id, zn.x - 4, 0.8, zn.z + 2, 2.5, 1.6, 1.5, woodMat);
   });
-  // Visitor house (interior rooms are separate small boxes inside, entered via House button).
-  building(-8, 28, 7, 4, 6, stoneMat, 'visitor-house');
+  // Visitor house exterior. Its furnished interior (living / bedroom / work corner)
+  // is built by buildHouseInterior below and shown only while the visitor is inside;
+  // entering hides this solid exterior box so the camera can see the rooms.
+  window.VW.houseEnt = building(-8, 28, 7, 4, 6, stoneMat, 'visitor-house');
+  window.VW.buildHouseInterior(app);
   // Trees (shared geometry, low poly) + lamps.
   for (var ti = 0; ti < 12; ti++) {
     var tx = -50 + ti * 9, tz = (ti % 2 ? -38 : 38);
@@ -111,6 +115,77 @@ window.VW.initWorld = function () {
   return true;
 };
 
+window.VW.buildHouseInterior = function (app) {
+  // Furnished interior for the visitor house at (-8, 28), footprint x -11.5..-4.5, z 25..31.
+  // All primitives are PlayCanvas boxes/spheres (<1k polys each), textures <=256px here,
+  // shared materials, no new lights, no shadows. Group is disabled until the visitor enters.
+  var group = new pc.Entity('house-interior');
+  app.root.addChild(group);
+  window.VW.interiorEnt = group;
+  var woodTex = window.VW.makeCanvasTexture(function (c, s) { window.VW.textureDraws.wood(c, s); }, 256);
+  var woodMat = window.VW.makeMaterial(app, woodTex, [0.55, 0.4, 0.25]);
+  var clothTex = window.VW.makeCanvasTexture(function (c, s) { window.VW.textureDraws.cloth(c, s, '#b03030'); }, 128);
+  var sofaMat = window.VW.makeMaterial(app, clothTex, [0.7, 0.2, 0.2]);
+  var clothTex2 = window.VW.makeCanvasTexture(function (c, s) { window.VW.textureDraws.cloth(c, s, '#3050b0'); }, 128);
+  var bedMat = window.VW.makeMaterial(app, clothTex2, [0.3, 0.45, 0.85]);
+  var stoneTex = window.VW.makeCanvasTexture(function (c, s) { window.VW.textureDraws.stone(c, s); }, 256);
+  var wallMat = window.VW.makeMaterial(app, stoneTex, [0.85, 0.8, 0.7]);
+  var lampMat = window.VW.makeMaterial(app, null, [1, 0.85, 0.4], [1, 0.85, 0.4]);
+  var coll = window.VW.entities.interiorColliders;
+  function wall(x, z, w, d) {
+    window.VW.box(app, group, 'iwall', x, 1.1, z, w, 2.2, d, wallMat);
+    coll.push({ x: x, z: z, hw: w / 2, hd: d / 2 });
+  }
+  function prop(x, z, sx, sy, sz, mat, name, solid) {
+    window.VW.box(app, group, name, x, sy / 2, z, sx, sy, sz, mat);
+    if (solid !== false) coll.push({ x: x, z: z, hw: sx / 2, hd: sz / 2 });
+  }
+  // Floor (visual only, player walks at y=0).
+  window.VW.box(app, group, 'ifloor', -8, 0, 28, 7, 0.1, 6, woodMat);
+  // Perimeter walls. North wall has a door gap x -8.8..-7.2 (the exit, facing the plaza).
+  wall(-10.15, 25, 2.7, 0.3); wall(-5.85, 25, 2.7, 0.3);
+  wall(-8, 31, 7, 0.3); wall(-11.5, 28, 0.3, 6); wall(-4.5, 28, 0.3, 6);
+  // Partition at z=28: living room (north) | bedroom+work corner (south), doorway x -8..-6.
+  wall(-9.75, 28, 3.5, 0.3); wall(-5.25, 28, 1.5, 0.3);
+  // Living room (north side): sofa, coffee table, armchair, lamp, bookcase.
+  prop(-10.3, 26.3, 2.0, 0.8, 0.9, sofaMat, 'sofa');
+  prop(-8.6, 26.6, 1.2, 0.45, 0.7, woodMat, 'coffee-table');
+  prop(-9.6, 27.4, 0.7, 0.9, 0.7, sofaMat, 'armchair');
+  prop(-5.7, 26.1, 0.4, 1.2, 0.4, woodMat, 'lamp-stand');
+  window.VW.sphere(app, group, 'lamp-glow', -5.7, 1.35, 26.1, 0.35, lampMat);
+  prop(-5.9, 25.55, 1.5, 1.1, 0.4, woodMat, 'bookcase');
+  // Bedroom (south-west): bed + pillow (visual only) + bedside table + wardrobe.
+  prop(-10.1, 29.9, 2.0, 0.55, 1.5, bedMat, 'bed');
+  window.VW.box(app, group, 'pillow', -10.85, 0.65, 29.9, 0.5, 0.2, 0.9, sofaMat);
+  prop(-8.7, 30.3, 0.6, 0.6, 0.6, woodMat, 'bedside');
+  prop(-11.15, 29.6, 0.5, 1.7, 1.2, woodMat, 'wardrobe');
+  // Work corner (south-east): desk, chair, wall shelf.
+  prop(-5.7, 30.2, 1.7, 0.75, 0.7, woodMat, 'desk');
+  prop(-5.7, 29.2, 0.6, 0.9, 0.6, sofaMat, 'work-chair');
+  prop(-4.9, 29.6, 0.4, 1.1, 1.2, woodMat, 'work-shelf');
+  group.enabled = false;
+};
+window.VW.enterHouse = function () {
+  var st = window.VW.state, p = st.player;
+  if (!window.VW.app) { window.VW.teleportTo('castle'); p.x = -8; p.z = 28; return; }
+  if (st.insideHouse) return;
+  st.insideHouse = true; st.tapPath = null; st.tapTarget = null;
+  p.x = -8; p.z = 26.5; p.y = 0; p.vy = 0; p.flying = false;
+  if (window.VW.houseEnt) window.VW.houseEnt.enabled = false;
+  if (window.VW.interiorEnt) window.VW.interiorEnt.enabled = true;
+  if (window.VW.Audio && window.VW.Audio.teleport) window.VW.Audio.teleport();
+  if (window.VW.syncHouseButton) window.VW.syncHouseButton();
+};
+window.VW.exitHouse = function () {
+  var st = window.VW.state, p = st.player;
+  if (!st.insideHouse) return;
+  st.insideHouse = false; st.tapPath = null; st.tapTarget = null;
+  p.x = -8; p.z = 23.5; p.y = 0; p.vy = 0;
+  if (window.VW.houseEnt) window.VW.houseEnt.enabled = true;
+  if (window.VW.interiorEnt) window.VW.interiorEnt.enabled = false;
+  if (window.VW.Audio && window.VW.Audio.teleport) window.VW.Audio.teleport();
+  if (window.VW.syncHouseButton) window.VW.syncHouseButton();
+};
 window.VW.buildAgents = function (app) {
   window.VW.CONFIG.agents.forEach(function (a) {
     var root = new pc.Entity('agent-' + a.id);
@@ -186,6 +261,71 @@ window.VW.collides = function (x, z) {
   }
   return false;
 };
+// Mode-aware collision: inside the house only interior walls/furniture block;
+// outside, the building list blocks (the house exterior included).
+window.VW.blockedAt = function (x, z) {
+  if (window.VW.state.insideHouse) {
+    var c = window.VW.entities.interiorColliders;
+    for (var i = 0; i < c.length; i++) {
+      if (Math.abs(x - c[i].x) < c[i].hw + 0.45 && Math.abs(z - c[i].z) < c[i].hd + 0.45) return true;
+    }
+    return false;
+  }
+  return window.VW.collides(x, z);
+};
+// Grid A* (BFS, 2m cells, world -58..58) around static colliders. Returns
+// simplified waypoints ending at the target (or the nearest free cell if the
+// target itself sits inside a collider). No path through walls by construction.
+window.VW.findPath = function (sx, sz, tx, tz) {
+  var CELL = 2, MIN = -58, N = 59;
+  function cell(v) { return Math.max(0, Math.min(N - 1, Math.floor((v - MIN) / CELL))); }
+  function centre(i) { return MIN + i * CELL + CELL / 2; }
+  function freeAt(i, j) { return !window.VW.blockedAt(centre(i), centre(j)); }
+  var si = cell(sx), sj = cell(sz), ti = cell(tx), tj = cell(tz);
+  if (!freeAt(ti, tj)) {
+    // Nearest free cell to the target, expanding ring up to 8 cells away.
+    var found = null;
+    for (var r = 1; r <= 8 && !found; r++) {
+      for (var di = -r; di <= r && !found; di++) {
+        for (var dj = -r; dj <= r && !found; dj++) {
+          if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+          var ci = ti + di, cj = tj + dj;
+          if (ci >= 0 && ci < N && cj >= 0 && cj < N && freeAt(ci, cj)) found = [ci, cj];
+        }
+      }
+    }
+    if (!found) return null;
+    ti = found[0]; tj = found[1]; tx = centre(ti); tz = centre(tj);
+  }
+  if (si === ti && sj === tj) return [{ x: tx, z: tz }];
+  var key = function (i, j) { return i + ',' + j; };
+  var prev = {}, seen = {}; seen[key(si, sj)] = true;
+  var q = [[si, sj]], dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  while (q.length) {
+    var cur = q.shift(), ci2 = cur[0], cj2 = cur[1];
+    if (ci2 === ti && cj2 === tj) break;
+    for (var d = 0; d < 4; d++) {
+      var ni = ci2 + dirs[d][0], nj = cj2 + dirs[d][1];
+      if (ni < 0 || ni >= N || nj < 0 || nj >= N || seen[key(ni, nj)] || !freeAt(ni, nj)) continue;
+      seen[key(ni, nj)] = true; prev[key(ni, nj)] = [ci2, cj2]; q.push([ni, nj]);
+    }
+  }
+  if (!seen[key(ti, tj)]) return null;
+  var cells = [], ccur = [ti, tj];
+  while (!(ccur[0] === si && ccur[1] === sj)) { cells.unshift(ccur); ccur = prev[key(ccur[0], ccur[1])]; }
+  // Simplify: keep only direction-change cells, then the exact target.
+  var pts = [], lastDir = null;
+  for (var k = 0; k < cells.length; k++) {
+    var px = k === 0 ? si : cells[k - 1][0], pz = k === 0 ? sj : cells[k - 1][1];
+    var dir = [cells[k][0] - px, cells[k][1] - pz];
+    if (k === cells.length - 1 || !lastDir || dir[0] !== lastDir[0] || dir[1] !== lastDir[1]) {
+      pts.push({ x: centre(cells[k][0]), z: centre(cells[k][1]) });
+    }
+    lastDir = dir;
+  }
+  pts.push({ x: tx, z: tz });
+  return pts;
+};
 window.VW.update = function (dt) {
   var st = window.VW.state, app = window.VW.app;
   if (!st.entered) return;
@@ -218,7 +358,16 @@ window.VW.update = function (dt) {
   if (st.keys['KeyA'] || st.keys['ArrowLeft']) mx -= 1;
   if (st.keys['KeyD'] || st.keys['ArrowRight']) mx += 1;
   mx += st.joystick.x; mz += st.joystick.y;
-  if (st.tapTarget) {
+  var manual = Math.abs(mx) > 0.01 || Math.abs(mz) > 0.01;
+  if (manual) { st.tapPath = null; st.tapTarget = null; }
+  else if (st.tapPath && st.tapPath.length) {
+    var wp = st.tapPath[0];
+    var wdx = wp.x - p.x, wdz = wp.z - p.z;
+    var wd = Math.sqrt(wdx * wdx + wdz * wdz);
+    if (wd < 0.6) { st.tapPath.shift(); if (!st.tapPath.length) st.tapTarget = null; }
+    else { mx = wdx / wd; mz = wdz / wd; }
+  }
+  else if (st.tapTarget) {
     var dx = st.tapTarget.x - p.x, dz = st.tapTarget.z - p.z;
     var d = Math.sqrt(dx * dx + dz * dz);
     if (d < 0.5) st.tapTarget = null; else { mx = dx / d; mz = dz / d; }
@@ -227,7 +376,10 @@ window.VW.update = function (dt) {
   if (len > 0.01) {
     mx /= Math.max(len, 1); mz /= Math.max(len, 1);
     var nx = p.x + mx * speed * dt, nz = p.z + mz * speed * dt;
-    if (!window.VW.collides(nx, nz)) { p.x = nx; p.z = nz; if (Math.random() < dt * 3) window.VW.Audio.footstep(p.swimming ? 'water' : 'ground'); }
+    if (!window.VW.blockedAt(nx, nz)) { p.x = nx; p.z = nz; if (Math.random() < dt * 3) window.VW.Audio.footstep(p.swimming ? 'water' : 'ground'); }
+    else if (!window.VW.blockedAt(nx, p.z)) { p.x = nx; }
+    else if (!window.VW.blockedAt(p.x, nz)) { p.z = nz; }
+    else { st.tapPath = null; st.tapTarget = null; }
   }
   // Water / bridge / gravity
   var inRiver = p.x >= 18 && p.x <= 22 && !(p.z >= -16 && p.z <= -12);
@@ -242,6 +394,8 @@ window.VW.update = function (dt) {
   }
   if (st.keys['Space'] && !p.flying && p.y <= window.VW.groundHeightAt(p.x, p.z) + 0.01) { p.vy = 7; }
   if (window.VW.playerEnt) window.VW.playerEnt.setLocalPosition(p.x, p.y, p.z);
+  // Walking north through the interior door gap exits the house.
+  if (st.insideHouse && p.z < 24.6) window.VW.exitHouse();
   // Boat drifts slowly
   if (window.VW.boatEnt) { var bp = window.VW.boatEnt.getLocalPosition(); bp.z += Math.sin((app.time || 0) * 0.3) * dt * 0.5; window.VW.boatEnt.setLocalPosition(bp); }
   // Workers + guards + animals animation
